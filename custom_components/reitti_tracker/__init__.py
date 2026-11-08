@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import timedelta
 
 import aiohttp
@@ -66,7 +67,7 @@ class ReittiPusher:
             "lon": lon,
             "alt": state.attributes.get("altitude", 0),
             "acc": state.attributes.get("gps_accuracy", 0),
-            "tst": int(state.last_updated.timestamp()),
+            "tst": int(time.time()),
         }
         url = opts[CONF_URL].rstrip("/") + INGEST_PATH
         session = async_get_clientsession(self.hass)
