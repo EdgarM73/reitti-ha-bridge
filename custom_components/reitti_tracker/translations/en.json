@@ -11,14 +11,26 @@
         }
       }
     },
-    "error": { "cannot_connect": "Could not reach the Reitti server." },
-    "abort": { "already_configured": "This device tracker is already configured." }
+    "error": {
+      "cannot_connect": "Could not reach the Reitti server."
+    },
+    "abort": {
+      "already_configured": "This device tracker is already configured."
+    }
   },
   "options": {
     "step": {
       "init": {
-        "data": { "enable_push": "Enable pushing", "interval_seconds": "Push interval" }
+        "data": {
+          "enable_push": "Enable pushing",
+          "interval_seconds": "Push interval",
+          "url": "Reitti URL",
+          "api_key": "API token"
+        }
       }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the Reitti server."
     }
   },
   "services": {

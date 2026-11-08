@@ -84,14 +84,26 @@ class ReittiConfigFlow(ConfigFlow, domain=DOMAIN):
 
 class ReittiOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
+        errors: dict[str, str] = {}
         if user_input is not None:
             user_input[CONF_INTERVAL] = int(user_input[CONF_INTERVAL])
-            return self.async_create_entry(data=user_input)
+            user_input[CONF_URL] = _normalize(user_input[CONF_URL])
+            if await _check(self.hass, user_input[CONF_URL]):
+                return self.async_create_entry(data=user_input)
+            errors["base"] = "cannot_connect"
         cur = {**self.config_entry.data, **self.config_entry.options}
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    vol.Required(CONF_URL, default=cur[CONF_URL]): str,
+                    vol.Required(
+                        CONF_API_KEY, default=cur[CONF_API_KEY]
+                    ): selector.TextSelector(
+                        selector.TextSelectorConfig(
+                            type=selector.TextSelectorType.PASSWORD
+                        )
+                    ),
                     vol.Required(
                         CONF_ENABLE_PUSH, default=cur.get(CONF_ENABLE_PUSH, True)
                     ): bool,
@@ -100,4 +112,5 @@ class ReittiOptionsFlow(OptionsFlow):
                     ): _INTERVAL,
                 }
             ),
+            errors=errors,
         )

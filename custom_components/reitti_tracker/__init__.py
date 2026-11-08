@@ -83,9 +83,18 @@ class ReittiPusher:
                     if resp.status in (200, 202):
                         _LOGGER.debug("Pushed %s to Reitti", payload)
                         return True
-                    _LOGGER.warning(
-                        "Reitti rejected push: %s %s", resp.status, await resp.text()
-                    )
+                    body = await resp.text()
+                    if resp.status >= 500:
+                        _LOGGER.warning(
+                            "Reitti rejected push: %s %s. If the Reitti log says "
+                            "'Token has no device attached', attach a device to "
+                            "this API token in Reitti.",
+                            resp.status, body,
+                        )
+                    else:
+                        _LOGGER.warning(
+                            "Reitti rejected push: %s %s", resp.status, body
+                        )
             except (aiohttp.ClientError, asyncio.TimeoutError) as err:
                 _LOGGER.warning("Could not reach Reitti at %s: %s", url, err)
         return False

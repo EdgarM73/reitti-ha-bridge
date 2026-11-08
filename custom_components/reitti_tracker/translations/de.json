@@ -11,14 +11,26 @@
         }
       }
     },
-    "error": { "cannot_connect": "Reitti-Server nicht erreichbar." },
-    "abort": { "already_configured": "Dieser Device Tracker ist bereits eingerichtet." }
+    "error": {
+      "cannot_connect": "Reitti-Server nicht erreichbar."
+    },
+    "abort": {
+      "already_configured": "Dieser Device Tracker ist bereits eingerichtet."
+    }
   },
   "options": {
     "step": {
       "init": {
-        "data": { "enable_push": "Senden aktiv", "interval_seconds": "Sende-Intervall" }
+        "data": {
+          "enable_push": "Senden aktiv",
+          "interval_seconds": "Sende-Intervall",
+          "url": "Reitti-URL",
+          "api_key": "API-Token"
+        }
       }
+    },
+    "error": {
+      "cannot_connect": "Reitti-Server nicht erreichbar."
     }
   },
   "services": {

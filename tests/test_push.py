@@ -67,3 +67,16 @@ async def test_unload_removes_service(hass, aioclient_mock):
     entry = await _setup(hass, aioclient_mock)
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert not hass.services.has_service(DOMAIN, "push_now")
+
+
+async def test_options_change_token(hass, aioclient_mock):
+    entry = await _setup(hass, aioclient_mock)
+    aioclient_mock.get(URL, status=200)
+    r = await hass.config_entries.options.async_init(entry.entry_id)
+    r = await hass.config_entries.options.async_configure(
+        r["flow_id"],
+        {"url": URL, "api_key": "newtok", "enable_push": True, "interval_seconds": 30},
+    )
+    assert r["type"] == FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert aioclient_mock.mock_calls[-1][1].query["token"] == "newtok"
