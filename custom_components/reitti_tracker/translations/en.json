@@ -1,0 +1,30 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Reitti Tracker",
+        "description": "Push a device tracker's location to your Reitti server.",
+        "data": {
+          "url": "Reitti URL (e.g. http://reitti.local:8080)",
+          "api_key": "API token",
+          "device": "Device tracker"
+        }
+      }
+    },
+    "error": { "cannot_connect": "Could not reach the Reitti server." },
+    "abort": { "already_configured": "This device tracker is already configured." }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": { "enable_push": "Enable pushing", "interval_seconds": "Push interval" }
+      }
+    }
+  },
+  "services": {
+    "push_now": {
+      "name": "Push now",
+      "description": "Send the current location to Reitti immediately."
+    }
+  }
+}

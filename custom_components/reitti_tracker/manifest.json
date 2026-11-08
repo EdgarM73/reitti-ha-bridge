@@ -1,0 +1,12 @@
+{
+  "domain": "reitti_tracker",
+  "name": "Reitti Tracker",
+  "codeowners": ["@EdgarM73"],
+  "config_flow": true,
+  "documentation": "https://github.com/EdgarM73/reitti-tracker",
+  "issue_tracker": "https://github.com/EdgarM73/reitti-tracker/issues",
+  "iot_class": "cloud_push",
+  "integration_type": "service",
+  "requirements": [],
+  "version": "0.1.0"
+}
