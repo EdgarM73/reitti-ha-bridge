@@ -5,7 +5,7 @@
         "title": "Reitti Tracker",
         "description": "Push a device tracker's location to your Reitti server.",
         "data": {
-          "url": "Reitti URL (e.g. http://reitti.local:8080)",
+          "url": "Reitti URL",
           "api_key": "API token",
           "device": "Device tracker"
         }
