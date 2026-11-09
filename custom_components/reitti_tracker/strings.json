@@ -9,13 +9,23 @@
           "api_key": "API token",
           "device": "Device tracker"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Reitti Tracker",
+        "description": "Change the Reitti server, API token or the tracked device.",
+        "data": {
+          "url": "Reitti URL",
+          "api_key": "API token",
+          "device": "Device tracker"
+        }
       }
     },
     "error": {
       "cannot_connect": "Could not reach the Reitti server."
     },
     "abort": {
-      "already_configured": "This device tracker is already configured."
+      "already_configured": "This device tracker is already configured.",
+      "reconfigure_successful": "Settings updated."
     }
   },
   "options": {
