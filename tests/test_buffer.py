@@ -153,3 +153,35 @@ async def test_remove_entry_deletes_buffer(hass, aioclient_mock, hass_storage):
     assert await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
     assert key not in hass_storage
+
+
+async def test_timestamp_is_report_time_and_extras_are_sent(hass, aioclient_mock):
+    entry = await _setup(hass, aioclient_mock)
+    hass.states.async_set(
+        TRACKER,
+        "not_home",
+        {
+            "latitude": 48.5, "longitude": 11.5, "gps_accuracy": 7, "altitude": 510,
+            "battery_level": 65, "speed": 5, "course": 181.4, "vertical_accuracy": 3,
+        },
+    )
+    await hass.async_block_till_done()
+    state = hass.states.get(TRACKER)
+    body = aioclient_mock.mock_calls[-1][2]
+    assert body["tst"] == int(state.last_reported.timestamp())
+    assert (body["batt"], body["vel"], body["cog"], body["vac"]) == (65.0, 18, 181, 3)
+
+    # idle repeat of the same report: current time, not the old report time
+    with patch("custom_components.reitti_tracker.time.time", return_value=2_000_000_000):
+        await hass.services.async_call(DOMAIN, "push_now", blocking=True)
+    assert aioclient_mock.mock_calls[-1][2]["tst"] == 2_000_000_000
+
+
+async def test_missing_or_bad_extras_are_left_out(hass, aioclient_mock):
+    await _setup(hass, aioclient_mock)
+    hass.states.async_set(
+        TRACKER, "not_home", {"latitude": 48.6, "longitude": 11.5, "speed": "n/a"}
+    )
+    await hass.async_block_till_done()
+    body = aioclient_mock.mock_calls[-1][2]
+    assert not {"batt", "vel", "cog", "vac"} & set(body)

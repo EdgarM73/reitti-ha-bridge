@@ -70,6 +70,7 @@ class ReittiPusher:
         self._queue: deque[dict] = deque(maxlen=MAX_BUFFER)
         self._last_pos: tuple | None = None
         self._last_recorded: float | None = None
+        self._last_reported = None  # datetime of the last tracker report used
         # delivery state
         self._failures = 0
         self._retry_at = 0.0
@@ -133,17 +134,40 @@ class ReittiPusher:
             _LOGGER.warning(
                 "Buffer is full (%s points), dropping the oldest point", MAX_BUFFER
             )
-        self._queue.append(
-            {
-                "_type": "location",
-                "tid": entity_id.split(".", 1)[1][:2].upper(),
-                "lat": lat,
-                "lon": lon,
-                "alt": state.attributes.get("altitude", 0),
-                "acc": state.attributes.get("gps_accuracy", 0),
-                "tst": int(time.time()),
-            }
-        )
+        # Timestamp: when the tracker reported this position to Home Assistant.
+        # If it has not reported since the last point (idle repeat), use now.
+        reported = getattr(state, "last_reported", None) or state.last_updated
+        if self._last_reported is None or reported > self._last_reported:
+            tst = int(reported.timestamp())
+            self._last_reported = reported
+        else:
+            tst = int(time.time())
+
+        attrs = state.attributes
+        payload = {
+            "_type": "location",
+            "tid": entity_id.split(".", 1)[1][:2].upper(),
+            "lat": lat,
+            "lon": lon,
+            "alt": attrs.get("altitude", 0),
+            "acc": attrs.get("gps_accuracy", 0),
+            "tst": tst,
+        }
+        # Optional OwnTracks fields, only if the tracker provides them.
+        for key, attr, convert in (
+            ("batt", "battery_level", float),
+            ("vel", "speed", lambda v: round(float(v) * 3.6)),  # m/s -> km/h
+            ("cog", "course", lambda v: round(float(v))),
+            ("vac", "vertical_accuracy", lambda v: round(float(v))),
+        ):
+            value = attrs.get(attr)
+            if value is None:
+                continue
+            try:
+                payload[key] = convert(value)
+            except (TypeError, ValueError):
+                pass
+        self._queue.append(payload)
         self._last_pos = (lat, lon)
         self._last_recorded = time.monotonic()
         self._changed()

@@ -30,6 +30,13 @@ Options (changeable later):
 - **Interval** (default 30 s): how often the tracker is checked. A changed position is also sent on every state change.
 - **Interval when position unchanged** (default 300 s): minimum time between two reports while the position has not changed.
 
+## What is sent
+Each point carries latitude, longitude, altitude, accuracy and a timestamp. The timestamp is the
+moment the tracker reported the position to Home Assistant (Home Assistant does not know the time of
+the GPS fix itself); repeated reports of an unchanged position use the current time.
+If the tracker provides them, battery level (`batt`), speed in km/h (`vel`), course (`cog`) and
+vertical accuracy (`vac`) are added. Reitti currently stores position, altitude, accuracy and time only.
+
 ## Buffering
 Every point is buffered until Reitti has accepted it. If Reitti is down or rejects the push,
 points are kept (up to 10 000, also across Home Assistant restarts) and delivered later in order
