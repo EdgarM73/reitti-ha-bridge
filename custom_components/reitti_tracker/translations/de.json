@@ -35,7 +35,12 @@
           "enable_push": "Senden aktiv",
           "interval_seconds": "Sende-Intervall",
           "url": "Reitti-URL",
-          "api_key": "API-Token"
+          "api_key": "API-Token",
+          "idle_interval_seconds": "Intervall bei unverändertem Standort"
+        },
+        "data_description": {
+          "interval_seconds": "Wie oft geprüft wird (Sekunden)",
+          "idle_interval_seconds": "Mindestabstand zwischen zwei Meldungen, solange sich der Standort nicht ändert"
         }
       }
     },

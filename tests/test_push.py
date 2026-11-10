@@ -90,7 +90,7 @@ async def test_options_change_token(hass, aioclient_mock):
     r = await hass.config_entries.options.async_init(entry.entry_id)
     r = await hass.config_entries.options.async_configure(
         r["flow_id"],
-        {"url": URL, "api_key": "newtok", "enable_push": True, "interval_seconds": 30},
+        {"url": URL, "api_key": "newtok", "enable_push": True, "interval_seconds": 30, "idle_interval_seconds": 600},
     )
     assert r["type"] == FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
@@ -166,3 +166,29 @@ async def test_reconfigure_connection_error(hass, aioclient_mock):
         r["flow_id"], {"url": URL, "api_key": "tok", "device": "device_tracker.iphone13"}
     )
     assert r["type"] == FlowResultType.FORM and r["errors"] == {"base": "cannot_connect"}
+
+
+async def test_unchanged_position_respects_idle_interval(hass, aioclient_mock):
+    from unittest.mock import patch
+
+    with patch("custom_components.reitti_tracker.time.monotonic", return_value=1000.0):
+        entry = await _setup(hass, aioclient_mock)
+        pusher = entry.runtime_data
+        n = len(aioclient_mock.mock_calls)
+        # same position, inside idle window (default 300 s) -> skipped
+        assert await pusher.push() is False
+        assert len(aioclient_mock.mock_calls) == n
+
+    with patch("custom_components.reitti_tracker.time.monotonic", return_value=1301.0):
+        # idle window elapsed -> reported again
+        assert await pusher.push() is True
+        assert len(aioclient_mock.mock_calls) == n + 1
+
+    with patch("custom_components.reitti_tracker.time.monotonic", return_value=1302.0):
+        # changed position -> immediate
+        hass.states.async_set("device_tracker.iphone13", "not_home", {"latitude": 48.9, "longitude": 11.9})
+        await hass.async_block_till_done()
+        assert len(aioclient_mock.mock_calls) == n + 2
+        # push_now forces even if unchanged
+        await hass.services.async_call(DOMAIN, "push_now", blocking=True)
+        assert len(aioclient_mock.mock_calls) == n + 3

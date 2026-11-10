@@ -35,7 +35,12 @@
           "enable_push": "Enable pushing",
           "interval_seconds": "Push interval",
           "url": "Reitti URL",
-          "api_key": "API token"
+          "api_key": "API token",
+          "idle_interval_seconds": "Interval when position unchanged"
+        },
+        "data_description": {
+          "interval_seconds": "How often the tracker is checked (seconds)",
+          "idle_interval_seconds": "Minimum time between two reports while the position has not changed"
         }
       }
     },

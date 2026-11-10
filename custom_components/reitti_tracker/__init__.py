@@ -21,8 +21,10 @@ from .const import (
     CONF_API_KEY,
     CONF_DEVICE,
     CONF_ENABLE_PUSH,
+    CONF_IDLE_INTERVAL,
     CONF_INTERVAL,
     CONF_URL,
+    DEFAULT_IDLE_INTERVAL,
     DEFAULT_INTERVAL,
     DOMAIN,
     INGEST_PATH,
@@ -39,12 +41,14 @@ class ReittiPusher:
         self.hass = hass
         self.entry = entry
         self._lock = asyncio.Lock()
+        self._last_pos: tuple | None = None
+        self._last_sent: float | None = None
 
     @property
     def _opts(self) -> dict:
         return {**self.entry.data, **self.entry.options}
 
-    async def push(self, _event: Event | None = None) -> bool:
+    async def push(self, _event: Event | None = None, *, force: bool = False) -> bool:
         opts = self._opts
         if not opts.get(CONF_ENABLE_PUSH, True):
             return False
@@ -59,6 +63,12 @@ class ReittiPusher:
         if lat is None or lon is None:
             _LOGGER.debug("Tracker %s has no coordinates", entity_id)
             return False
+
+        # Unchanged position: only report again after the idle interval.
+        if not force and self._last_sent is not None:
+            idle = opts.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL)
+            if (lat, lon) == self._last_pos and time.monotonic() - self._last_sent < idle:
+                return False
 
         payload = {
             "_type": "location",
@@ -82,6 +92,8 @@ class ReittiPusher:
                 ) as resp:
                     if resp.status in (200, 202):
                         _LOGGER.debug("Pushed %s to Reitti", payload)
+                        self._last_pos = (lat, lon)
+                        self._last_sent = time.monotonic()
                         return True
                     body = await resp.text()
                     if resp.status >= 500:
@@ -118,7 +130,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def _push_now(call: ServiceCall) -> None:
         for e in hass.config_entries.async_loaded_entries(DOMAIN):
-            await e.runtime_data.push()
+            await e.runtime_data.push(force=True)
 
     if not hass.services.has_service(DOMAIN, SERVICE_PUSH_NOW):
         hass.services.async_register(DOMAIN, SERVICE_PUSH_NOW, _push_now)

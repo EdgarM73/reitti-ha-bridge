@@ -15,10 +15,19 @@ from .const import (
     CONF_API_KEY,
     CONF_DEVICE,
     CONF_ENABLE_PUSH,
+    CONF_IDLE_INTERVAL,
     CONF_INTERVAL,
     CONF_URL,
+    DEFAULT_IDLE_INTERVAL,
     DEFAULT_INTERVAL,
     DOMAIN,
+)
+
+_IDLE = selector.NumberSelector(
+    selector.NumberSelectorConfig(
+        min=10, max=86400, step=1, unit_of_measurement="s",
+        mode=selector.NumberSelectorMode.BOX,
+    )
 )
 
 _INTERVAL = selector.NumberSelector(
@@ -171,6 +180,7 @@ class ReittiOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             user_input[CONF_INTERVAL] = int(user_input[CONF_INTERVAL])
+            user_input[CONF_IDLE_INTERVAL] = int(user_input[CONF_IDLE_INTERVAL])
             user_input[CONF_URL] = _normalize(user_input[CONF_URL])
             if await _check(self.hass, user_input[CONF_URL]):
                 return self.async_create_entry(data=user_input)
@@ -194,6 +204,10 @@ class ReittiOptionsFlow(OptionsFlow):
                     vol.Required(
                         CONF_INTERVAL, default=cur.get(CONF_INTERVAL, DEFAULT_INTERVAL)
                     ): _INTERVAL,
+                    vol.Required(
+                        CONF_IDLE_INTERVAL,
+                        default=cur.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL),
+                    ): _IDLE,
                 }
             ),
             errors=errors,
