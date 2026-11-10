@@ -18,6 +18,13 @@
           "api_key": "API token",
           "device": "Device tracker"
         }
+      },
+      "reauth_confirm": {
+        "title": "API token rejected",
+        "description": "Reitti no longer accepts the API token. Enter a valid token (it needs a device attached in Reitti).",
+        "data": {
+          "api_key": "API token"
+        }
       }
     },
     "error": {
@@ -25,7 +32,8 @@
     },
     "abort": {
       "already_configured": "This device tracker is already configured.",
-      "reconfigure_successful": "Settings updated."
+      "reconfigure_successful": "Settings updated.",
+      "reauth_successful": "API token updated."
     }
   },
   "options": {
@@ -52,6 +60,26 @@
     "push_now": {
       "name": "Push now",
       "description": "Send the current location to Reitti immediately."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "ok": "OK",
+          "unreachable": "Reitti unreachable",
+          "rejected": "Rejected by Reitti",
+          "auth_failed": "API token rejected"
+        }
+      },
+      "last_push": {
+        "name": "Last successful push"
+      },
+      "buffered": {
+        "name": "Buffered points",
+        "unit_of_measurement": "points"
+      }
     }
   }
 }

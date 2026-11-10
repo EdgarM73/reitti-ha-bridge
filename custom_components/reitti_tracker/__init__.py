@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import logging
 import time
 from datetime import timedelta
@@ -10,12 +11,15 @@ from datetime import timedelta
 import aiohttp
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import Event, HomeAssistant, ServiceCall
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
 )
+from homeassistant.helpers.storage import Store
 
 from .const import (
     CONF_API_KEY,
@@ -27,95 +31,236 @@ from .const import (
     DEFAULT_IDLE_INTERVAL,
     DEFAULT_INTERVAL,
     DOMAIN,
+    FLUSH_BATCH,
     INGEST_PATH,
+    MAX_BUFFER,
+    REMIND_AFTER,
+    RETRY_MAX,
+    RETRY_MIN,
     SERVICE_PUSH_NOW,
+    STATUS_AUTH_FAILED,
+    STATUS_OK,
+    STATUS_REJECTED,
+    STATUS_UNREACHABLE,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
+PLATFORMS = [Platform.SENSOR]
+SAVE_DELAY = 10
+
+
+def signal_update(entry_id: str) -> str:
+    return f"{DOMAIN}_{entry_id}_update"
+
 
 class ReittiPusher:
-    """Sends the current tracker position to Reitti."""
+    """Records tracker positions and delivers them to Reitti.
+
+    Every position is put into a buffer first and removed only after Reitti
+    accepted it, so points survive outages of Reitti and restarts of Home
+    Assistant and are delivered later with their original timestamp.
+    """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
         self.entry = entry
         self._lock = asyncio.Lock()
+        self._store: Store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
+        self._queue: deque[dict] = deque(maxlen=MAX_BUFFER)
         self._last_pos: tuple | None = None
-        self._last_sent: float | None = None
+        self._last_recorded: float | None = None
+        # delivery state
+        self._failures = 0
+        self._retry_at = 0.0
+        self._last_warned = 0.0
+        # exposed to the sensors
+        self.status: str | None = None
+        self.last_error: str | None = None
+        self.last_error_at: float | None = None
+        self.last_success_at: float | None = None
 
     @property
     def _opts(self) -> dict:
         return {**self.entry.data, **self.entry.options}
 
-    async def push(self, _event: Event | None = None, *, force: bool = False) -> bool:
-        opts = self._opts
-        if not opts.get(CONF_ENABLE_PUSH, True):
-            return False
+    @property
+    def buffered(self) -> int:
+        return len(self._queue)
 
+    async def async_load(self) -> None:
+        data = await self._store.async_load() or {}
+        self._queue.extend(data.get("queue", []))
+        self.last_success_at = data.get("last_success")
+
+    def _data_to_save(self) -> dict:
+        return {"queue": list(self._queue), "last_success": self.last_success_at}
+
+    async def async_save(self) -> None:
+        await self._store.async_save(self._data_to_save())
+
+    async def async_remove_store(self) -> None:
+        await self._store.async_remove()
+
+    def _changed(self) -> None:
+        self._store.async_delay_save(self._data_to_save, SAVE_DELAY)
+        async_dispatcher_send(self.hass, signal_update(self.entry.entry_id))
+
+    def _record(self, force: bool) -> None:
+        """Put the tracker's current position into the buffer if it is due."""
+        opts = self._opts
         entity_id = opts[CONF_DEVICE]
         state = self.hass.states.get(entity_id)
         if state is None:
-            _LOGGER.warning("Tracker %s not found", entity_id)
-            return False
+            _LOGGER.debug("Tracker %s not found", entity_id)
+            return
         lat = state.attributes.get("latitude")
         lon = state.attributes.get("longitude")
         if lat is None or lon is None:
             _LOGGER.debug("Tracker %s has no coordinates", entity_id)
-            return False
+            return
 
         # Unchanged position: only report again after the idle interval.
-        if not force and self._last_sent is not None:
+        if not force and self._last_recorded is not None:
             idle = opts.get(CONF_IDLE_INTERVAL, DEFAULT_IDLE_INTERVAL)
-            if (lat, lon) == self._last_pos and time.monotonic() - self._last_sent < idle:
-                return False
+            if (
+                (lat, lon) == self._last_pos
+                and time.monotonic() - self._last_recorded < idle
+            ):
+                return
 
-        payload = {
-            "_type": "location",
-            "tid": entity_id.split(".", 1)[1][:2].upper(),
-            "lat": lat,
-            "lon": lon,
-            "alt": state.attributes.get("altitude", 0),
-            "acc": state.attributes.get("gps_accuracy", 0),
-            "tst": int(time.time()),
-        }
+        if len(self._queue) == MAX_BUFFER:
+            _LOGGER.warning(
+                "Buffer is full (%s points), dropping the oldest point", MAX_BUFFER
+            )
+        self._queue.append(
+            {
+                "_type": "location",
+                "tid": entity_id.split(".", 1)[1][:2].upper(),
+                "lat": lat,
+                "lon": lon,
+                "alt": state.attributes.get("altitude", 0),
+                "acc": state.attributes.get("gps_accuracy", 0),
+                "tst": int(time.time()),
+            }
+        )
+        self._last_pos = (lat, lon)
+        self._last_recorded = time.monotonic()
+        self._changed()
+
+    async def push(self, _event: Event | None = None, *, force: bool = False) -> bool:
+        """Record the current position if due, then deliver the buffer.
+
+        Returns True if something was delivered and the buffer is empty.
+        """
+        if not self._opts.get(CONF_ENABLE_PUSH, True):
+            return False
+        self._record(force)
+        if not self._queue:
+            return False
+        if not force and time.monotonic() < self._retry_at:
+            return False  # backing off after a failure
+        return await self._flush()
+
+    async def _flush(self) -> bool:
+        opts = self._opts
         url = opts[CONF_URL].rstrip("/") + INGEST_PATH
         session = async_get_clientsession(self.hass)
-
+        sent = 0
         async with self._lock:
-            try:
-                async with session.post(
-                    url,
-                    params={"token": opts[CONF_API_KEY]},
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status in (200, 202):
-                        _LOGGER.debug("Pushed %s to Reitti", payload)
-                        self._last_pos = (lat, lon)
-                        self._last_sent = time.monotonic()
-                        return True
-                    body = await resp.text()
-                    if resp.status >= 500:
-                        _LOGGER.warning(
-                            "Reitti rejected push: %s %s. If the Reitti log says "
-                            "'Token has no device attached', attach a device to "
-                            "this API token in Reitti.",
-                            resp.status, body,
-                        )
-                    else:
-                        _LOGGER.warning(
-                            "Reitti rejected push: %s %s", resp.status, body
-                        )
-            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
-                _LOGGER.warning("Could not reach Reitti at %s: %s", url, err)
-        return False
+            while self._queue and sent < FLUSH_BATCH:
+                payload = self._queue[0]
+                try:
+                    async with session.post(
+                        url,
+                        params={"token": opts[CONF_API_KEY]},
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        status = resp.status
+                        body = "" if status in (200, 202) else await resp.text()
+                except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+                    self._failed(STATUS_UNREACHABLE, f"Could not reach Reitti at {url}: {err}")
+                    return False
+
+                if status in (200, 202):
+                    self._queue.popleft()
+                    sent += 1
+                    self._succeeded()
+                    continue
+                if status in (400, 422):
+                    # Reitti will never accept this point; don't block the rest.
+                    _LOGGER.warning(
+                        "Reitti refused a point for good (%s %s), dropping it: %s",
+                        status, body, payload,
+                    )
+                    self._queue.popleft()
+                    self._changed()
+                    continue
+                if status in (401, 403):
+                    self._failed(
+                        STATUS_AUTH_FAILED,
+                        f"Reitti rejected push: {status} {body}. The API token is not accepted",
+                    )
+                    self.entry.async_start_reauth(self.hass)
+                    return False
+                hint = (
+                    ". If the Reitti log says 'Token has no device attached', "
+                    "attach a device to this API token in Reitti"
+                    if status >= 500
+                    else ""
+                )
+                self._failed(STATUS_REJECTED, f"Reitti rejected push: {status} {body}{hint}")
+                return False
+
+        if self._queue:
+            # More than one batch is buffered: keep going without blocking the caller.
+            self.entry.async_create_background_task(
+                self.hass, self._flush(), f"{DOMAIN} flush"
+            )
+            return False
+        return sent > 0
+
+    def _succeeded(self) -> None:
+        if self._failures:
+            _LOGGER.info(
+                "Reitti accepts points again after %s failed attempts, "
+                "%s buffered points left to deliver",
+                self._failures, len(self._queue),
+            )
+        self._failures = 0
+        self._retry_at = 0.0
+        self.status = STATUS_OK
+        self.last_success_at = time.time()
+        self._changed()
+
+    def _failed(self, status: str, message: str) -> None:
+        """Warn once per outage, then only remind now and then."""
+        self._failures += 1
+        now = time.monotonic()
+        self._retry_at = now + min(RETRY_MIN * 2 ** (self._failures - 1), RETRY_MAX)
+        if self._failures == 1 or now - self._last_warned >= REMIND_AFTER:
+            self._last_warned = now
+            _LOGGER.warning(
+                "%s. %s points are buffered and will be delivered later "
+                "(attempt %s, further failures are logged at debug level)",
+                message, len(self._queue), self._failures,
+            )
+        else:
+            _LOGGER.debug("%s (attempt %s)", message, self._failures)
+        self.status = status
+        self.last_error = message
+        self.last_error_at = time.time()
+        self._changed()
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     pusher = ReittiPusher(hass, entry)
+    await pusher.async_load()
     entry.runtime_data = pusher
     opts = pusher._opts
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(
         async_track_state_change_event(hass, [opts[CONF_DEVICE]], pusher.push)
@@ -145,9 +290,16 @@ async def _reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        return False
+    await entry.runtime_data.async_save()  # keep undelivered points
     remaining = [
         e for e in hass.config_entries.async_loaded_entries(DOMAIN) if e is not entry
     ]
     if not remaining:
         hass.services.async_remove(DOMAIN, SERVICE_PUSH_NOW)
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}").async_remove()

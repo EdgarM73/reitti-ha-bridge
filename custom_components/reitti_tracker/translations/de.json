@@ -18,6 +18,13 @@
           "api_key": "API-Token",
           "device": "Device Tracker"
         }
+      },
+      "reauth_confirm": {
+        "title": "API-Token abgelehnt",
+        "description": "Reitti akzeptiert den API-Token nicht mehr. Gib einen gültigen Token ein (ihm muss in Reitti ein Gerät zugeordnet sein).",
+        "data": {
+          "api_key": "API-Token"
+        }
       }
     },
     "error": {
@@ -25,7 +32,8 @@
     },
     "abort": {
       "already_configured": "Dieser Device Tracker ist bereits eingerichtet.",
-      "reconfigure_successful": "Einstellungen aktualisiert."
+      "reconfigure_successful": "Einstellungen aktualisiert.",
+      "reauth_successful": "API-Token aktualisiert."
     }
   },
   "options": {
@@ -52,6 +60,26 @@
     "push_now": {
       "name": "Jetzt senden",
       "description": "Sendet den aktuellen Standort sofort an Reitti."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "ok": "OK",
+          "unreachable": "Reitti nicht erreichbar",
+          "rejected": "Von Reitti abgelehnt",
+          "auth_failed": "API-Token abgelehnt"
+        }
+      },
+      "last_push": {
+        "name": "Letzte erfolgreiche Meldung"
+      },
+      "buffered": {
+        "name": "Gepufferte Punkte",
+        "unit_of_measurement": "Punkte"
+      }
     }
   }
 }

@@ -170,6 +170,34 @@ class ReittiConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_reauth(self, entry_data: dict[str, Any]):
+        """Reitti answered 401/403: ask for a new API token."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None):
+        entry = self._get_reauth_entry()
+        if user_input is not None:
+            # Drop a token stored in the options, it would shadow the new one.
+            options = {k: v for k, v in entry.options.items() if k != CONF_API_KEY}
+            self.hass.config_entries.async_update_entry(
+                entry,
+                data={**entry.data, CONF_API_KEY: user_input[CONF_API_KEY]},
+                options=options,
+            )  # the update listener reloads the entry
+            return self.async_abort(reason="reauth_successful")
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_API_KEY): selector.TextSelector(
+                        selector.TextSelectorConfig(
+                            type=selector.TextSelectorType.PASSWORD
+                        )
+                    )
+                }
+            ),
+        )
+
     @staticmethod
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         return ReittiOptionsFlow()

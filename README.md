@@ -25,8 +25,25 @@ Copy `custom_components/reitti_tracker` into your Home Assistant `config/custom_
   otherwise Reitti answers with HTTP 500 (`Token has no device attached`).
 - **Device tracker**: the entity whose position is forwarded
 
-Options (changeable later): enable/disable pushing, interval (default 30 s), URL and token.
-A push also happens on every state change of the tracker.
+Options (changeable later):
+- enable/disable pushing, URL and token
+- **Interval** (default 30 s): how often the tracker is checked. A changed position is also sent on every state change.
+- **Interval when position unchanged** (default 300 s): minimum time between two reports while the position has not changed.
+
+## Buffering
+Every point is buffered until Reitti has accepted it. If Reitti is down or rejects the push,
+points are kept (up to 10 000, also across Home Assistant restarts) and delivered later in order
+with their original timestamp. Retries back off from 30 s up to 10 min; `push_now` retries immediately.
+The log warns once per outage and then every 30 minutes.
+
+## Sensors
+| Sensor | Description |
+|---|---|
+| Status | `ok`, `unreachable`, `rejected` or `auth_failed`; the last error is in the attributes |
+| Last successful push | time Reitti last accepted a point |
+| Buffered points | points waiting for delivery |
+
+If Reitti answers 401/403, Home Assistant asks for a new API token (re-authentication).
 
 ## Services
 | Service | Description |
