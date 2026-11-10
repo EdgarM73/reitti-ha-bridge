@@ -16,6 +16,7 @@ from homeassistant.core import Event, HomeAssistant, ServiceCall
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
+    async_call_later,
     async_track_state_change_event,
     async_track_time_interval,
 )
@@ -50,6 +51,12 @@ PLATFORMS = [Platform.SENSOR]
 SAVE_DELAY = 10
 
 
+def _short(body: str) -> str:
+    """One line, limited length: proxies answer with whole HTML pages."""
+    body = " ".join(body.split())
+    return body if len(body) <= 200 else body[:200] + "..."
+
+
 def signal_update(entry_id: str) -> str:
     return f"{DOMAIN}_{entry_id}_update"
 
@@ -75,6 +82,7 @@ class ReittiPusher:
         self._failures = 0
         self._retry_at = 0.0
         self._last_warned = 0.0
+        self._cancel_retry = None
         # exposed to the sensors
         self.status: str | None = None
         self.last_error: str | None = None
@@ -202,7 +210,7 @@ class ReittiPusher:
                         timeout=aiohttp.ClientTimeout(total=10),
                     ) as resp:
                         status = resp.status
-                        body = "" if status in (200, 202) else await resp.text()
+                        body = "" if status in (200, 202) else _short(await resp.text())
                 except (aiohttp.ClientError, asyncio.TimeoutError) as err:
                     self._failed(STATUS_UNREACHABLE, f"Could not reach Reitti at {url}: {err}")
                     return False
@@ -231,7 +239,7 @@ class ReittiPusher:
                 hint = (
                     ". If the Reitti log says 'Token has no device attached', "
                     "attach a device to this API token in Reitti"
-                    if status >= 500
+                    if status == 500
                     else ""
                 )
                 self._failed(STATUS_REJECTED, f"Reitti rejected push: {status} {body}{hint}")
@@ -245,6 +253,17 @@ class ReittiPusher:
             return False
         return sent > 0
 
+    def cancel_retry(self) -> None:
+        if self._cancel_retry:
+            self._cancel_retry()
+            self._cancel_retry = None
+
+    async def _retry(self, _now=None) -> None:
+        """Retry on our own schedule, independent of the check interval."""
+        self._cancel_retry = None
+        if self._queue and self._opts.get(CONF_ENABLE_PUSH, True):
+            await self._flush()
+
     def _succeeded(self) -> None:
         if self._failures:
             _LOGGER.info(
@@ -254,6 +273,7 @@ class ReittiPusher:
             )
         self._failures = 0
         self._retry_at = 0.0
+        self.cancel_retry()
         self.status = STATUS_OK
         self.last_success_at = time.time()
         self._changed()
@@ -262,7 +282,10 @@ class ReittiPusher:
         """Warn once per outage, then only remind now and then."""
         self._failures += 1
         now = time.monotonic()
-        self._retry_at = now + min(RETRY_MIN * 2 ** (self._failures - 1), RETRY_MAX)
+        delay = min(RETRY_MIN * 2 ** (self._failures - 1), RETRY_MAX)
+        self._retry_at = now + delay
+        self.cancel_retry()
+        self._cancel_retry = async_call_later(self.hass, delay, self._retry)
         if self._failures == 1 or now - self._last_warned >= REMIND_AFTER:
             self._last_warned = now
             _LOGGER.warning(
@@ -316,6 +339,7 @@ async def _reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         return False
+    entry.runtime_data.cancel_retry()
     await entry.runtime_data.async_save()  # keep undelivered points
     remaining = [
         e for e in hass.config_entries.async_loaded_entries(DOMAIN) if e is not entry

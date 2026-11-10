@@ -185,3 +185,31 @@ async def test_missing_or_bad_extras_are_left_out(hass, aioclient_mock):
     await hass.async_block_till_done()
     body = aioclient_mock.mock_calls[-1][2]
     assert not {"batt", "vel", "cog", "vac"} & set(body)
+
+
+async def test_retry_does_not_wait_for_the_check_interval(hass, aioclient_mock):
+    """With a long check interval a stationary tracker must still recover."""
+    from datetime import timedelta
+
+    from homeassistant.util import dt as dt_util
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    aioclient_mock.post(ENDPOINT, status=502, text="<html>\n<h1>502 Bad Gateway</h1>\n</html>")
+    _move(hass, 48.2)
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=DATA, unique_id=DATA["device"],
+        options={"interval_seconds": 3600},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    pusher = entry.runtime_data
+    assert pusher.buffered == 1
+    assert "\n" not in pusher.last_error and "Token has no device" not in pusher.last_error
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.post(ENDPOINT, status=200)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
+    await hass.async_block_till_done()
+    assert pusher.buffered == 0
+    assert pusher.status == "ok"

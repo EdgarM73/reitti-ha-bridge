@@ -40,7 +40,7 @@ vertical accuracy (`vac`) are added. Reitti currently stores position, altitude,
 ## Buffering
 Every point is buffered until Reitti has accepted it. If Reitti is down or rejects the push,
 points are kept (up to 10 000, also across Home Assistant restarts) and delivered later in order
-with their original timestamp. Retries back off from 30 s up to 10 min; `push_now` retries immediately.
+with their original timestamp. Retries run on their own timer, independent of the check interval, and back off from 30 s up to 10 min; `push_now` retries immediately.
 The log warns once per outage and then every 30 minutes.
 
 ## Sensors
