@@ -21,6 +21,7 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
 )
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_API_KEY,
@@ -35,6 +36,8 @@ from .const import (
     FLUSH_BATCH,
     INGEST_PATH,
     MAX_BUFFER,
+    MOVING_SPEED,
+    MOVING_STALE_LIMIT,
     REMIND_AFTER,
     RETRY_MAX,
     RETRY_MIN,
@@ -115,6 +118,23 @@ class ReittiPusher:
         self._store.async_delay_save(self._data_to_save, SAVE_DELAY)
         async_dispatcher_send(self.hass, signal_update(self.entry.entry_id))
 
+    @staticmethod
+    def _is_stale_moving(state) -> bool:
+        """True if the last report showed movement and is not too old yet.
+
+        A phone in a car may report only every few minutes. Repeating its last
+        position with the current time would put the car at a place it has
+        already left.
+        """
+        try:
+            speed = float(state.attributes.get("speed"))
+        except (TypeError, ValueError):
+            return False
+        if speed < MOVING_SPEED:
+            return False
+        reported = getattr(state, "last_reported", None) or state.last_updated
+        return (dt_util.utcnow() - reported).total_seconds() < MOVING_STALE_LIMIT
+
     def _record(self, force: bool) -> None:
         """Put the tracker's current position into the buffer if it is due."""
         opts = self._opts
@@ -136,6 +156,12 @@ class ReittiPusher:
                 (lat, lon) == self._last_pos
                 and time.monotonic() - self._last_recorded < idle
             ):
+                return
+            if (lat, lon) == self._last_pos and self._is_stale_moving(state):
+                _LOGGER.debug(
+                    "Tracker %s was moving and has not reported since, not repeating",
+                    entity_id,
+                )
                 return
 
         if len(self._queue) == MAX_BUFFER:
