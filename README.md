@@ -34,6 +34,8 @@ Options (changeable later):
 Each point carries latitude, longitude, altitude, accuracy and a timestamp. The timestamp is the
 moment the tracker reported the position to Home Assistant (Home Assistant does not know the time of
 the GPS fix itself); repeated reports of an unchanged position use the current time.
+If the last report showed movement (speed of 1 m/s or more) and the tracker then stays silent, the position is
+not repeated for up to 15 minutes, because it is stale and the device has already moved on.
 If the tracker provides them, battery level (`batt`), speed in km/h (`vel`), course (`cog`) and
 vertical accuracy (`vac`) are added. Reitti currently stores position, altitude, accuracy and time only.
 
